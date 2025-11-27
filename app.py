@@ -42,8 +42,15 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    msg = event.message.text.strip() # 移除前後空白
+    msg = event.message.text.strip()
     
+    # ==========================================
+    # 設定時區：日本時間 (UTC+9)
+    # ==========================================
+    tz = datetime.timezone(datetime.timedelta(hours=9)) 
+    now_jp = datetime.datetime.now(tz) # 取得現在的日本時間
+    # ==========================================
+
     try:
         # === 功能 A: 刪除上一筆 ===
         if msg == "刪除":
@@ -58,7 +65,7 @@ def handle_message(event):
             else:
                 reply_text = "目前沒有可以刪除的記錄喔！"
 
-        # === 功能 B: 查詢目前總帳本 ===
+        # === 功能 B: 查詢總帳本 ===
         elif msg == "查詢" or msg == "總計":
             sheet = get_worksheet()
             col_values = sheet.col_values(2)[1:] 
@@ -72,29 +79,27 @@ def handle_message(event):
                 f"📊 目前帳本總計：\n"
                 f"🇯🇵 累積日幣：{total_jpy:,.0f} 円\n"
                 f"🇹🇼 換算台幣：{total_ntd:,.0f} 元\n"
-                f"(以目前匯率 {rate} 計算)"
+                f"(匯率 {rate})"
             )
 
-        # === 功能 C (新功能): 查詢特定日期花費 ===
-        # 邏輯：判斷是否為 "今天"、"昨天" 或 "YYYY-MM-DD" 格式
+        # === 功能 C: 查詢特定日期 (使用日本時間判斷) ===
         elif msg in ["今天", "昨天"] or (len(msg) == 10 and msg.count('-') == 2):
             
-            # 1. 決定要查詢的日期字串 (target_date)
             target_date = ""
             if msg == "今天":
-                target_date = datetime.datetime.now().strftime("%Y-%m-%d")
+                # 使用 now_jp
+                target_date = now_jp.strftime("%Y-%m-%d")
             elif msg == "昨天":
-                target_date = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                # 使用 now_jp 減一天
+                target_date = (now_jp - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
             else:
-                # 嘗試驗證使用者輸入的是不是日期格式 (例如 2023-11-27)
                 try:
                     datetime.datetime.strptime(msg, "%Y-%m-%d")
                     target_date = msg
                 except ValueError:
-                    reply_text = "日期格式錯誤，請輸入 YYYY-MM-DD (例如 2023-11-27)"
+                    reply_text = "日期格式錯誤，請輸入 YYYY-MM-DD"
                     target_date = None
 
-            # 2. 如果日期格式正確，開始查詢
             if target_date:
                 sheet = get_worksheet()
                 all_records = sheet.get_all_values()
@@ -103,12 +108,10 @@ def handle_message(event):
                 day_total_ntd = 0
                 count = 0
 
-                # 遍歷每一行 (略過標題)
                 for row in all_records[1:]:
-                    # row[0] 是時間 "2023-11-27 10:00:00"，我們用 startswith 比對日期部分
                     if row[0].startswith(target_date):
-                        day_total_jpy += float(row[1]) # 日幣
-                        day_total_ntd += float(row[3]) # 台幣 (當時記錄的金額)
+                        day_total_jpy += float(row[1])
+                        day_total_ntd += float(row[3])
                         count += 1
                 
                 if count > 0:
@@ -117,27 +120,26 @@ def handle_message(event):
                         f"──────────\n"
                         f"🔢 筆數：{count} 筆\n"
                         f"🇯🇵 日幣：{day_total_jpy:,.0f} 円\n"
-                        f"🇹🇼 台幣：{day_total_ntd:,.0f} 元\n"
-                        f"(台幣金額為記帳當下的數值)"
+                        f"🇹🇼 台幣：{day_total_ntd:,.0f} 元"
                     )
                 else:
                     reply_text = f"📅 {target_date}\n\n這一天沒有任何記帳紀錄喔！"
 
-        # === 功能 D: 記帳 (輸入純數字) ===
+        # === 功能 D: 記帳 (使用日本時間紀錄) ===
         else:
-            amount_jpy = float(msg) # 嘗試把文字轉成數字
+            amount_jpy = float(msg)
             
-            # 1. 抓匯率
             currencies = twder.now('JPY')
             rate = float(currencies[2])
             amount_ntd = amount_jpy * rate
             
-            # 2. 寫入 Google Sheet
             sheet = get_worksheet()
-            dt_string = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 使用日本時間字串寫入 Google Sheet
+            dt_string = now_jp.strftime("%Y-%m-%d %H:%M:%S")
+            
             sheet.append_row([dt_string, amount_jpy, rate, amount_ntd])
             
-            # 3. 回覆訊息 (這裡把台幣試算加回來了！)
             reply_text = (
                 f"✅ 已記錄這筆消費：\n"
                 f"🇯🇵 {amount_jpy:,.0f} JPY\n"
@@ -146,7 +148,7 @@ def handle_message(event):
             )
 
     except ValueError:
-        reply_text = "看不懂這個指令喔 🥺\n\n你可以輸入：\n1. 數字 (記帳)\n2. 刪除 (刪除上一筆)\n3. 查詢 (看總額)\n4. 今天/昨天 (看單日花費)"
+        reply_text = "看不懂這個指令喔 🥺"
     except Exception as e:
         reply_text = f"發生錯誤：{str(e)}"
 
