@@ -127,16 +127,23 @@ def handle_message(event):
         else:
             amount_jpy = float(msg) # 嘗試把文字轉成數字
             
+            # 1. 抓匯率
             currencies = twder.now('JPY')
             rate = float(currencies[2])
             amount_ntd = amount_jpy * rate
             
+            # 2. 寫入 Google Sheet
             sheet = get_worksheet()
             dt_string = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             sheet.append_row([dt_string, amount_jpy, rate, amount_ntd])
             
-            # 簡單回覆就好，不用每次都算總額
-            reply_text = f"✅ 已記錄：{amount_jpy:,.0f} JPY"
+            # 3. 回覆訊息 (這裡把台幣試算加回來了！)
+            reply_text = (
+                f"✅ 已記錄這筆消費：\n"
+                f"🇯🇵 {amount_jpy:,.0f} JPY\n"
+                f"🇹🇼 約 {amount_ntd:,.0f} TWD\n"
+                f"(匯率 {rate})"
+            )
 
     except ValueError:
         reply_text = "看不懂這個指令喔 🥺\n\n你可以輸入：\n1. 數字 (記帳)\n2. 刪除 (刪除上一筆)\n3. 查詢 (看總額)\n4. 今天/昨天 (看單日花費)"
