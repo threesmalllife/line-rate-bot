@@ -50,64 +50,96 @@ def handle_message(event):
             sheet = get_worksheet()
             all_records = sheet.get_all_values()
             
-            if len(all_records) > 1: # 確保不刪除標題列
+            if len(all_records) > 1:
                 last_row_index = len(all_records)
-                deleted_row = all_records[-1] # 取得被刪除的那一行資料
+                deleted_row = all_records[-1]
                 sheet.delete_rows(last_row_index)
                 reply_text = f"🗑️ 已刪除最後一筆記錄：\n{deleted_row[0]} - {deleted_row[1]} JPY"
             else:
                 reply_text = "目前沒有可以刪除的記錄喔！"
 
-        # === 功能 B: 查詢目前總計 ===
-        elif msg == "查詢" or msg == "結算":
+        # === 功能 B: 查詢目前總帳本 ===
+        elif msg == "查詢" or msg == "總計":
             sheet = get_worksheet()
-            # 讀取第二欄 (B欄) 所有金額，略過第一列標題
             col_values = sheet.col_values(2)[1:] 
-            total_jpy = sum([float(x) for x in col_values if x.isdigit() or x.replace('.','',1).isdigit()])
+            total_jpy = sum([float(x) for x in col_values if x.replace('.','',1).isdigit()])
             
-            # 抓即時匯率換算總額
             currencies = twder.now('JPY')
             rate = float(currencies[2])
             total_ntd = total_jpy * rate
             
             reply_text = (
-                f"📊 目前帳本統計：\n"
+                f"📊 目前帳本總計：\n"
                 f"🇯🇵 累積日幣：{total_jpy:,.0f} 円\n"
                 f"🇹🇼 換算台幣：{total_ntd:,.0f} 元\n"
-                f"(匯率 {rate})"
+                f"(以目前匯率 {rate} 計算)"
             )
 
-        # === 功能 C: 記帳 (輸入數字) ===
-        else:
-            # 嘗試把輸入當作數字處理
-            amount_jpy = float(msg)
+        # === 功能 C (新功能): 查詢特定日期花費 ===
+        # 邏輯：判斷是否為 "今天"、"昨天" 或 "YYYY-MM-DD" 格式
+        elif msg in ["今天", "昨天"] or (len(msg) == 10 and msg.count('-') == 2):
             
-            # 1. 抓匯率
+            # 1. 決定要查詢的日期字串 (target_date)
+            target_date = ""
+            if msg == "今天":
+                target_date = datetime.datetime.now().strftime("%Y-%m-%d")
+            elif msg == "昨天":
+                target_date = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                # 嘗試驗證使用者輸入的是不是日期格式 (例如 2023-11-27)
+                try:
+                    datetime.datetime.strptime(msg, "%Y-%m-%d")
+                    target_date = msg
+                except ValueError:
+                    reply_text = "日期格式錯誤，請輸入 YYYY-MM-DD (例如 2023-11-27)"
+                    target_date = None
+
+            # 2. 如果日期格式正確，開始查詢
+            if target_date:
+                sheet = get_worksheet()
+                all_records = sheet.get_all_values()
+                
+                day_total_jpy = 0
+                day_total_ntd = 0
+                count = 0
+
+                # 遍歷每一行 (略過標題)
+                for row in all_records[1:]:
+                    # row[0] 是時間 "2023-11-27 10:00:00"，我們用 startswith 比對日期部分
+                    if row[0].startswith(target_date):
+                        day_total_jpy += float(row[1]) # 日幣
+                        day_total_ntd += float(row[3]) # 台幣 (當時記錄的金額)
+                        count += 1
+                
+                if count > 0:
+                    reply_text = (
+                        f"📅 {target_date} 消費統計：\n"
+                        f"──────────\n"
+                        f"🔢 筆數：{count} 筆\n"
+                        f"🇯🇵 日幣：{day_total_jpy:,.0f} 円\n"
+                        f"🇹🇼 台幣：{day_total_ntd:,.0f} 元\n"
+                        f"(台幣金額為記帳當下的數值)"
+                    )
+                else:
+                    reply_text = f"📅 {target_date}\n\n這一天沒有任何記帳紀錄喔！"
+
+        # === 功能 D: 記帳 (輸入純數字) ===
+        else:
+            amount_jpy = float(msg) # 嘗試把文字轉成數字
+            
             currencies = twder.now('JPY')
             rate = float(currencies[2])
             amount_ntd = amount_jpy * rate
             
-            # 2. 寫入 Google Sheet
             sheet = get_worksheet()
             dt_string = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            # 新增一行 [時間, 日幣, 匯率, 台幣]
             sheet.append_row([dt_string, amount_jpy, rate, amount_ntd])
             
-            # 3. 計算累計
-            col_values = sheet.col_values(2)[1:]
-            total_jpy = sum([float(x) for x in col_values])
-            total_ntd = total_jpy * rate
-
-            reply_text = (
-                f"✅ 已記錄！\n"
-                f"本次：{amount_jpy:,.0f} JPY (約 {amount_ntd:,.0f} TWD)\n"
-                f"──────────\n"
-                f"💰 目前累積日幣：{total_jpy:,.0f} 円\n"
-                f"🇹🇼 累積換算台幣：{total_ntd:,.0f} 元"
-            )
+            # 簡單回覆就好，不用每次都算總額
+            reply_text = f"✅ 已記錄：{amount_jpy:,.0f} JPY"
 
     except ValueError:
-        reply_text = "請輸入「數字」記帳，或是輸入「刪除」、「查詢」。"
+        reply_text = "看不懂這個指令喔 🥺\n\n你可以輸入：\n1. 數字 (記帳)\n2. 刪除 (刪除上一筆)\n3. 查詢 (看總額)\n4. 今天/昨天 (看單日花費)"
     except Exception as e:
         reply_text = f"發生錯誤：{str(e)}"
 
@@ -115,6 +147,5 @@ def handle_message(event):
         event.reply_token,
         TextSendMessage(text=reply_text)
     )
-
 if __name__ == "__main__":
     app.run(port=5000)
