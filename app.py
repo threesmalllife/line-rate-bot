@@ -40,6 +40,12 @@ def callback():
         abort(400)
     return 'OK'
 
+# === 新增：喚醒專用路徑 ===
+@app.route("/", methods=['GET'])
+def home():
+    return "Hello! I am awake!", 200
+
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg = event.message.text.strip()
